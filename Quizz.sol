@@ -1,124 +1,141 @@
 // SPDX-License-Identifier: GPL-3.0
 
-pragma solidity ^0.7.0;
+pragma solidity ^0.6.9;
 
 contract Quizz {
 
-    address payable public owner;
-    string result;
-    uint public numOfQuestions;
-    uint numOfTest;
-    uint correctAnswer;
-
+    // each question has four answer choices and only one correct anser choice
     struct Question {
-        uint testId;
-        uint number;
-        string quest;
-        string optA;
-        string optB;
-        string optC;
-        string optKey;
+        string question;
+        string correctAns;
+        string wrongAns1;
+        string wrongAns2;
+        string wrongAns3;
     }
 
-    struct Test {
+    struct QuizzEvent {
+        uint id;
+        address creator;
+        string name;
+        uint fee;
+        uint pool;
+        Question q1;
+        mapping(address => bool) hasPaid;
+        mapping(address => bool) attempts;
+    }
+
+    // stores the same information as a quiz except for question information
+    struct QuizzDisplayable {
         uint id;
         string name;
-        uint minimumScore;
-        uint reward;
+        uint fee;
+        uint pool;
+        mapping(address => bool) attempts;
     }
 
-    struct Participant {
-        string name;
-        string email;
-        string mobile_number;
+    mapping(uint => QuizzEvent) quizzes;
+    mapping(uint => QuizzDisplayable) quizzDisp;
+
+    uint public numOfQuizzes;
+
+    event fetchquizz (uint indexed _quizzId); // get quizz questions
+    event quizztaken (uint indexed _quizzId); // quizz answers submitted
+
+    // upon contract creation, initialize number of quizzes to 0 and create a new quizz event
+    constructor () public {
+        numOfQuizzes = 0;
+        // makeQuizz("Sample Quizz", 1, 0, "2 + 2 =", "4", "3", "5", "2");
     }
 
-    constructor(){
-        numOfQuestions = 0;
-        correctAnswer = 0;
-        owner = msg.sender;
-
-        // create default test
-        createTest(1, "Math", 60, 10);
-
-        // create default question, you can add other question by use addQuestion function
-        addQuestion(1, 1, "1 + 1 = ?", "1", "2", "3", "b");
-        addQuestion(1, 2, "1 + 2 = ?", "1", "2", "3", "c");
+    // increment number of quizzes
+    // create a new quizz event and add it to the list of quizzes
+    // create a new quizz displayable and add it to the list of displayable quizzes
+    // add the creator as a user who has attempted so the creator cannot attempt the quizz
+    function makeQuizz (string memory _name, uint _fee, uint _pool, string memory _question, string memory _ans1, string memory _ans2, string memory _ans3, string memory _ans4) public {
+        numOfQuizzes ++;
+        quizzes[numOfQuizzes] = QuizzEvent(numOfQuizzes, msg.sender, _name, _fee, _pool, Question(_question, _ans1, _ans2, _ans3, _ans4));
+        quizzDisp[numOfQuizzes] = QuizzDisplayable(numOfQuizzes, _name, _fee, _pool);
+        quizzes[numOfQuizzes].attempts[msg.sender] = true;
     }
 
-    mapping(uint => Question) quests;
-
-    Test test;
-    // only owner can acccess this function
-    function createTest(uint _id, string memory _name, uint _minimumScore, uint _reward) public isOwner {
-        numOfTest++;
-        test = Test(_id, _name, _minimumScore, _reward);
+    // returns quizz information for _quizzId without returning the questions
+    function getQuizzDisp(uint _quizzId) view public returns(uint, string memory, uint, uint) {
+        QuizzDisplayable memory temp = quizzDisp[_quizzId];
+        return (temp.id, temp.name, temp.fee, temp.pool);
     }
 
-    // only owner can acccess this function
-    // require to create test first before use this function
-    function addQuestion(uint _testId, uint _number, string memory _quest,string memory _optA, string memory _optB, string memory _optC, string memory _optKey) public isOwner {
-        require(numOfTest > 0, "Plase create Test first");
-        numOfQuestions++;
-        quests[numOfQuestions] = Question(_testId, _number, _quest, _optA, _optB, _optC, _optKey);
+    // adds the user to the list of users who have attemped this quizz
+    function setAttempt(uint _quizzId) public {
+        quizzes[_quizzId].attempts[msg.sender] = true;
     }
 
-    Participant participant;
-    // only participant can acccess this function
-    // rate is 2 ether
-    function registration(string memory _name, string memory _email, string memory _mobile_number) payable external isParticipant checkQuizRates(2 ether) {
-        participant = Participant(_name, _email, _mobile_number);
-        owner.transfer(msg.value);
+    // checks to see if the user has paid but has not attempted
+    // this is used to bypass the front-end form to submit the fee
+    function canSkip(uint _quizzId) view public returns (bool) {
+        bool skip = quizzes[_quizzId].hasPaid[msg.sender] && !quizzes[_quizzId].attempts[msg.sender];
+        return skip;
     }
 
-    // show question of test by number of question    
-    function showQuestion(uint _number) view public returns (uint, string memory, string memory, string memory, string memory) {
-        Question memory q = quests[_number];
-        return (
-            q.number, 
-            q.quest, 
-            string(abi.encodePacked("a. ", q.optA)), 
-            string(abi.encodePacked("b. ", q.optB)), 
-            string(abi.encodePacked("c. ", q.optC))
-        );
+    // requires that the quizz event exists\
+    // requires that the account trying to access the quizz information has not taken it before
+    // once the account receives the quizz, add the account to the list of accounts that have attempted this quizz
+    function getQuizz(uint _quizzId) view public returns (string memory, string memory, string memory, string memory, string memory) {
+        require(_quizzId > 0 && _quizzId <= numOfQuizzes);
+        require(!quizzes[_quizzId].attempts[msg.sender]);
+        Question memory q = quizzes[_quizzId].q1;
+        return (q.question, q.correctAns, q.wrongAns1, q.wrongAns2, q.wrongAns3);
     }
 
-    // only participant can acccess this function
-    function startTest(uint _number, string memory _answer) public isParticipant {
-        require(_number > 0 && _number <= numOfQuestions);
-        if (keccak256(abi.encodePacked(_answer)) == keccak256(abi.encodePacked(quests[_number].optKey))) {
-            correctAnswer++;
-        }
+    // requires that the quizz exists
+    // requires that the account has not attempted the quizz before
+    // allows users to send money
+    // the contract's account balance will hold all of the ether for all quizz event pools
+    // require that amount paid is greater than equal to current amount in pool
+    // add fee to the pool of _quizzId
+    // add the user to the mapping has paid to indicate that the user has paid the appropriate fee to take the quizz
+    // fetch the quizz for the user to access.
+    function payToPlay(uint _quizzId) public payable {
+        require(_quizzId > 0 && _quizzId <= numOfQuizzes); // checks if quizz exist
+        require(!quizzes[_quizzId].attempts[msg.sender]); // checks if they have not attempted
+        require(msg.value >= quizzes[_quizzId].fee); // if they paid the right amount
+        quizzes[_quizzId].pool += msg.value;
+        quizzes[_quizzId].hasPaid[msg.sender] = true;
+        emit fetchquizz(_quizzId);
     }
 
-    // checking for correct answer
-    function testChecking() payable external {
-        uint score = 0;
-        score = correctAnswer / numOfQuestions * 100;
-        if(score >= test.minimumScore) {
-            result = string(abi.encodePacked("Congratulation ", participant.name, ", You passed the test!"));
-        } else {
-            result = string(abi.encodePacked("Sorry ", participant.name, ", You can try again later"));
-        }
+    // returns the number of quiz events
+    function getNum() public view returns (uint) {
+        return numOfQuizzes;
+    }
+    
+    // requires that the quiz exists
+    // returns the current pool amount of the quizz event _quizzId
+    // show the user how much reward a certain quizz has
+    function getPoolAmount(uint _quizzId) view public returns (uint) {
+        require(_quizzId > 0 && _quizzId <= numOfQuizzes); // checking if quizz exists
+        return quizzes[_quizzId].pool;
     }
 
-    // view result
-    function viewResult() public view returns (string memory) {
-        return result;
+    // requires that the quizz event exists
+    // requires that the account has paid the fee to attempt the quizz
+    // requires that the account has attempted the quizz
+    // hashes the question's correct answer and the answer submitted by the account and compares the two hashes
+    // if the two hashes are equal, then return true, otherwise false
+    function scoreAttempt(uint _quizzId, string memory _ans) view public returns (bool) {
+        require(_quizzId > 0 && _quizzId <= numOfQuizzes);
+        require(quizzes[_quizzId].hasPaid[msg.sender]);
+        require(quizzes[_quizzId].attempts[msg.sender]);
+        return (keccak256(abi.encodePacked(_ans)) == keccak256(abi.encodePacked(quizzes[_quizzId].q1.correctAns)));
     }
-
-    modifier isOwner {
-        require (owner == msg.sender, "Only admin can access this function");
-        _;
-    }
-
-    modifier isParticipant {
-        require (owner != msg.sender, "Only participant can access this function");
-        _;
-    }
-
-    modifier checkQuizRates(uint _rates) {
-        require (msg.value >= _rates, "Insufficient payment, the rate is 2 ether");
-        _;
+    
+    // requires that the account has paid the fee to attempt the quizz
+    // requires that the account has attempted the quizz
+    // transfer the amount of ether in the pool of _quizzId to the winner
+    // set the _quizzId pool amount to 0
+    function awardLottery (uint _quizzId, address payable _winner) public {
+        require(quizzes[_quizzId].hasPaid[_winner]);
+        require(quizzes[_quizzId].attempts[_winner]);
+        _winner.transfer(quizzes[_quizzId].pool);
+        quizzes[_quizzId].pool = 0;
     }
 }
